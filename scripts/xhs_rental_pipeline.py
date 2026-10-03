@@ -92,6 +92,7 @@ def _add_req(p: argparse.ArgumentParser) -> None:
     g.add_argument("--bedrooms", nargs="+", help="允许的户型：开间 一居 两居 三居（或 0 1 2 3）")
     g.add_argument("--max-age-days", type=int, help="只要 N 天内发布的帖子（超出会标记，不删除）")
     g.add_argument("--area-keywords", nargs="+", help="区域/地铁站/小区关键词，正文未提及则标记")
+    g.add_argument("--city", help="房源所在城市（如 北京），用于比对发帖 IP 属地")
 
 
 def _save_req(pl: RentalPipeline, a: argparse.Namespace) -> None:
@@ -101,6 +102,7 @@ def _save_req(pl: RentalPipeline, a: argparse.Namespace) -> None:
         "bedrooms": _bedrooms(a.bedrooms),
         "max_age_days": a.max_age_days,
         "must_have": a.area_keywords,
+        "city": a.city,
     }
     if any(v not in (None, [], "") for v in req.values()):
         pl.save_requirements(req)

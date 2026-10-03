@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from .extract import clean_post_text
 from .rules import Requirements
 
 
@@ -28,6 +29,8 @@ def _fmt_req(req: Requirements) -> str:
         parts.append(f"{req.max_age_days} 天内发布")
     if req.must_have:
         parts.append("区域关键词 " + "、".join(req.must_have))
+    if req.city:
+        parts.append(f"城市 {req.city}")
     return "；".join(parts) or "（未设置）"
 
 
@@ -78,15 +81,21 @@ def build_review_markdown(
         if r["mismatches"]:
             out.append("- ❌ 不符需求：" + "；".join(r["mismatches"]))
         if hist.get("checked"):
-            out.append(
-                f"- 主页：共 {hist['total_notes']} 篇，其中房源帖 {hist['listing_notes']} 篇"
-                + (f"（{'；'.join(hist['listing_titles'][:3])}）" if hist["listing_titles"] else "")
+            line = f"- 主页：共 {hist['total_notes']} 篇；其他房源帖 {hist['listing_notes']} 篇"
+            line += (
+                f"（不同房源 {hist.get('distinct_listings', 0)}，"
+                f"同一套重复发布 {hist.get('repost_notes', 0)}）"
             )
+            if hist.get("listing_titles"):
+                line += "；不同房源：" + "；".join(hist["listing_titles"][:3])
+            if hist.get("repost_titles"):
+                line += "；重复发布：" + "；".join(hist["repost_titles"][:2])
+            out.append(line)
         elif hist.get("error"):
             out.append(f"- 主页：核验失败（{hist['error'][:40]}）")
         else:
             out.append("- 主页：未核验")
-        body = (r.get("desc") or "").strip().replace("\n", " ")
+        body = clean_post_text(r.get("desc") or "").replace("\n", " ")
         if len(body) > body_chars:
             body = body[:body_chars] + "…"
         out += ["", f"> {body or '(正文为空)'}", ""]

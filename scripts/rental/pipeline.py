@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import logging
 import random
+import re
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -338,6 +339,7 @@ class RentalPipeline:
                     prof.user_basic_info.desc,
                     titles,
                     p.get("title", ""),
+                    p.get("desc", ""),
                 )
             except Exception as e:
                 if _is_verification(e):
@@ -358,7 +360,13 @@ class RentalPipeline:
 
     # ─── 5. 研判 ───────────────────────────────────────────────────────────
 
-    def _assess(self, p: dict, hist: AuthorHistory | None, req: Requirements):
+    def _assess(
+        self,
+        p: dict,
+        hist: AuthorHistory | None,
+        req: Requirements,
+        duplicates: list[str] | None = None,
+    ):
         return assess(
             p.get("title", ""),
             p.get("desc", ""),
@@ -366,6 +374,8 @@ class RentalPipeline:
             author_id=p.get("user", {}).get("userId", ""),
             tags=p.get("tags") or [],
             comments=p.get("comments") or [],
+            ip=p.get("ip", ""),
+            duplicates=duplicates,
             history=hist,
             publish_ts_ms=p.get("time") or None,
             now_ts_ms=self.now_ms,
@@ -377,10 +387,11 @@ class RentalPipeline:
         _require(src, "inspect")
         posts = _read_json(src, [])
         req = self.load_requirements()
+        dups = find_cross_account_duplicates(posts)
         results = []
         for p in posts:
             hist = self._history_for(p)
-            a = self._assess(p, hist, req)
+            a = self._assess(p, hist, req, dups.get(p["id"]))
             results.append(
                 {
                     "id": p["id"],
@@ -506,6 +517,37 @@ class RentalPipeline:
             if i < len(targets) - 1:
                 time.sleep(random.uniform(20, 40))  # 评论间隔放宽，避免被判定为刷评论
         return plan
+
+
+def _shingles(text: str, k: int = 5) -> set[str]:
+    from .extract import clean_post_text, normalize
+
+    body = re.sub(r"#\S+", " ", clean_post_text(text))  # 话题标签不参与比对
+    s = "".join(ch for ch in normalize(body) if ch.isalnum())
+    return {s[i : i + k] for i in range(max(0, len(s) - k + 1))}
+
+
+def find_cross_account_duplicates(
+    posts: list[dict], threshold: float = 0.6
+) -> dict[str, list[str]]:
+    """找出正文与“其他账号”的帖子高度雷同的帖子：{帖子id: [雷同账号昵称…]}。
+
+    同一账号重复发布不算（那是正常的“顶帖”）；不同账号发同一段文案，基本是批量运营。
+    """
+    sh = [
+        _shingles(p.get("desc") or "") if len(p.get("desc") or "") >= 40 else set() for p in posts
+    ]
+    out: dict[str, list[str]] = {}
+    for i, a in enumerate(posts):
+        for j in range(i + 1, len(posts)):
+            b = posts[j]
+            ua, ub = a.get("user", {}).get("userId"), b.get("user", {}).get("userId")
+            if not sh[i] or not sh[j] or (ua and ua == ub):
+                continue
+            if len(sh[i] & sh[j]) / len(sh[i] | sh[j]) >= threshold:
+                out.setdefault(a["id"], []).append(b.get("user", {}).get("nickname", "?"))
+                out.setdefault(b["id"], []).append(a.get("user", {}).get("nickname", "?"))
+    return out
 
 
 def ensure_bridge(bridge_url: str) -> dict[str, bool]:

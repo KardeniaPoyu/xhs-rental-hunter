@@ -464,6 +464,8 @@ def _req_chips(req: Requirements | None) -> list[str]:
         chips.append("户型 " + "/".join("开间" if b == 0 else f"{b}居" for b in req.bedrooms))
     if req.max_age_days:
         chips.append(f"{req.max_age_days} 天内发布")
+    if req.city:
+        chips.append(f"城市 {req.city}")
     if req.must_have:
         chips.append("区域 " + "、".join(req.must_have[:4]))
     return chips

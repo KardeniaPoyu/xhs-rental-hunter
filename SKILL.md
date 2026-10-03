@@ -61,7 +61,7 @@ uv run python scripts/cli.py check-login                      # 未登录会给�
 uv run python scripts/xhs_rental_pipeline.py run-all \
   --keywords "东坝 整租 转租" "褡裢坡 一居 转租" "朝阳 个人转租 整租" \
   --budget-min 3500 --budget-max 5000 --bedrooms 一居 两居 \
-  --max-age-days 30 --area-keywords 东坝 褡裢坡 \
+  --max-age-days 30 --area-keywords 东坝 褡裢坡 --city 北京 \
   --limit 15 --author-limit 8
 ```
 
@@ -89,6 +89,8 @@ uv run python scripts/xhs_rental_pipeline.py run-all \
 - 规则判“排除”的帖子是否误杀（看 review.md 末尾“已排除”表）
 - 价格明显低于同区域行情 → 引流钓鱼
 - 主页未核验或核验失败的高分帖：结论最多给“待核实”
+- “跨账号雷同”要看另一个账号是谁（昵称“小号”+本人日常 ≠ 批量中介）；IP 属地不符可能只是人在外地
+- 公租房/保障房/人才房（如“燕保”）转租有被清退风险，即使发帖人真实也要提醒
 
 然后把精选结果写入 `<W>/curated.json`（格式：[references/curated-schema.md](references/curated-schema.md)），
 一般 3~6 套推荐 + 1 个典型避坑案例，重新出图：
