@@ -1,0 +1,51 @@
+[project]
+name = "xhs-rental-hunter"
+version = "1.0.0"
+description = "小红书个人整租转租猎人与防中介/串串房避坑技能，基于真实浏览器自动化，支持房源检索、防坑研判、实拍海报渲染与批量评论互动"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [
+    { name = "KardeniaPoyu" }
+]
+dependencies = [
+    "pillow>=10.0.0",
+    "python-socks>=2.8.1",
+    "requests>=2.28.0",
+    "websockets>=12.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.9.0",
+    "pytest>=8.0",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "RUF",  # ruff-specific rules
+]
+ignore = [
+    "E402",   # module-level imports not at top
+    "RUF001", # ambiguous unicode characters (Chinese punctuation is intentional)
+    "RUF002", # ambiguous unicode in docstrings
+    "RUF003", # ambiguous unicode in comments
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["xhs"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
