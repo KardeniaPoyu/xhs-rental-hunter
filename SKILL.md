@@ -1,8 +1,12 @@
 ---
 name: xhs-rental-hunter
 description: >-
-  小红书个人整租转租检索与防中介/防串串房避坑全能技能。打包小红书自动化操作能力（环境检查、搜索、详情抓取、实拍图片下载、防坑算法研判、长图报告生成、批量跟进评论）。精准识别伪装人设中介、多套房历史、AI三竖杠模板与甲醛串串房，生成图文并茂的租房调研报告。
-version: 1.0.0
+  在小红书上找真实个人整租/转租房源并识别中介马甲、二房东与串串房。用户说“小红书找房/租房/整租/转租”、
+  “帮我筛掉中介”、“看看这几个房源帖靠不靠谱”、“生成租房报告/长图”，或给出城市+区域+预算想租房时使用。
+  通过用户已登录的 Chrome（扩展 + 本地 bridge）检索、抓取详情与发帖人主页，规则初判后由 Claude 逐条复核，
+  输出带实拍图的长图报告与看房追问清单。Use for finding genuine individual rentals on Xiaohongshu (RED)
+  and screening out agents, sublessors and flipped "chuanchuan" apartments.
+version: 2.0.0
 metadata:
   openclaw:
     requires:
@@ -16,114 +20,125 @@ metadata:
       - windows
 ---
 
-# 小红书个人整租猎人与防坑技能 (xhs-rental-hunter)
+# 小红书个人整租猎人
 
-你是**小红书租房猎人与防坑专家**。专门帮助用户从小红书海量房源贴中筛选出**真实个人的整租/转租**房源，严格剔除中介马甲、商业公寓、合租隔断与甲醛“串串房”，并自动生成包含房间实拍照片的高清长图报告。
+目标：从小红书房源帖里找出**真实个人**发布的**整租 / 转租**房源，剔除中介马甲、二房东、商业公寓、
+合租单间和劣质翻新的串串房，交给用户一份能直接拿去约看房的结论。
 
----
+分工原则：**脚本做机械活，Claude 做判断。** 脚本负责检索、抓取、抽取价格户型、关键词初判和画图；
+“这个人到底是不是中介”需要读原文、看主页、看口吻 —— 这一步必须由你（Claude）完成，不能直接照搬规则分。
 
-## 🛡️ 核心防中介与防串串房 4 大鉴别法则
-
-在研判任何小红书租房帖子时，必须严格执行以下 4 大防坑避障规则：
-
-### 1. 警惕假职业人设（串串房重灾区）
-* **特征**：中介或二房东喜欢把主页或昵称包装成“化妆师”、“宝妈”、“作家”、“手艺人”、“自由插画师”或“发廊理发师”。
-* **排查方式**：若发帖人自称此类职业，但点开主页或收藏夹全是各种不同区域的房子，或房间极度崭新无杂物，多为劣质翻新“串串房”，必须重点核验。
-
-### 2. 识别文案叠词与多套历史（中介马甲）
-* **特征**：文案必带“0中介费”、“无中介费”、“中介勿扰”、“房东直租”、“个人转租”等密集标签。
-* **排查方式**：若口口声声称“个人转租”，但主页过去几个月发过多套不同地段的房源，一律定性为职业中介假冒个人。
-
-### 3. 识破 AI 润色与三竖杠模板（批量营销号）
-* **特征**：标题惯用三个竖杠（如 `北京个人转租｜0中介费｜xx小区`），配以致死量夸张 emoji（✨🥰🔥🏠），通篇没有任何真实居住痛点和具体生活细节。
-* **真实个人特征对比**：真租客通常会写明**具体工作调动/换大房原因**、**合同剩余具体月份**、**自费购买家具转赠/交接**、**看房时间限定在工作日晚或周末**、**直接与房东签约**。
-
-### 4. 警惕“装女生”网名（皮下中介男）
-* **特征**：网名起得很可爱或女性化，资料显示女性，文案以“姐妹们”自称，但私信或线下带看时全为抽烟迟到的中年油腻男中介。
+所有命令在本 Skill 根目录执行。`<W>` 指工作目录（默认 `./rental_work`）。
 
 ---
 
-## 📦 打包的小红书自动化能力清单
+## 第 0 步：确认需求（缺什么问什么，一次问完）
 
-本技能深度整合了底层的 `xiaohongshu-skills` 引擎，无需依赖任何第三方外部 API：
+| 需求 | 用途 | 未提供时 |
+|---|---|---|
+| 城市 + 区域/商圈/地铁站/小区 | 生成关键词、`--area-keywords` | **必须问** |
+| 预算区间 | `--budget-min/--budget-max` | 问；用户说“都行”就不设 |
+| 户型 | `--bedrooms 开间 一居 两居` | 默认不限 |
+| 入住时间 | 对照 `move_in` / 租期 | 默认不限 |
+| 能否接受转租（非原始合同） | 报告里标注 | 默认接受，但优先“可与房东重签” |
 
-| 能力模块 | 对应底层指令 / 实现 | 作用 |
-|---------|-------------------|------|
-| **认证与状态** | `python scripts/cli.py check-login` | 自动检查 Chrome 浏览器扩展与小红书登录状态 |
-| **多词并发检索** | `python scripts/xhs_rental_pipeline.py search` | 根据目标区域、户型、预算自动进行多词检索去重 |
-| **智能硬排除** | `python scripts/xhs_rental_pipeline.py filter` | 自动剔除求租帖、已租帖、合租单间与明显营销号 |
-| **深度详情提取** | `python scripts/xhs_rental_pipeline.py inspect` | 自动进入 SPA 详情抓取完整正文、租金、博主信息与图片列表 |
-| **防坑研判打分** | `python scripts/xhs_rental_pipeline.py analyze` | 自动化执行 4 大防坑规则，计算真实信任分与风险标签 |
-| **长图报告生成** | `python scripts/xhs_rental_pipeline.py render-poster` | 自动下载房间实拍图，排版生成 1260px 高清信息图海报 |
-| **跟进互动** | `python scripts/xhs_rental_pipeline.py comment` | 对精选出的高可信房源自动发送“礼貌问价”评论 |
+用户已经在消息里说清楚的，不要再问。
 
----
+## 第 1 步：生成关键词（3~6 个）
 
-## 🚀 极速上手与工作流指南
+个人房东/租客的帖子很少写“房东直租”这种词 —— 那恰恰是中介最爱用的。推荐组合：
 
-### 步骤 1：确认登录环境
-在执行任何检索前，确保本地已启动 Bridge Server，且 Chrome 扩展已连接并登录小红书：
-```bash
-python scripts/cli.py check-login
-```
+- `{商圈/地铁站} 整租 转租`、`{小区名} 转租`、`{商圈} 一居 转租`
+- 大区兜底：`{区} 个人转租 整租`
+- 热门城区加 `--publish-time 一周内`；冷门区域用默认（不限）
 
-### 步骤 2：一键全流程执行 (推荐)
-只需传入目标区域关键词、户型与深度抓取数量：
-```bash
-python scripts/xhs_rental_pipeline.py run-all \
-  --keywords "朝阳区 一居室 整租 转租" "东坝 整租 转租" "姚家园 整租 转租" \
-  --limit 20 \
-  --output-png "./rental_report.png"
-```
-
-### 步骤 3：分步执行（细粒度控制）
-若需要针对筛选结果做人工复核或分段调试，可逐步运行：
+## 第 2 步：跑流水线
 
 ```bash
-# 1. 检索
-python scripts/xhs_rental_pipeline.py search \
-  --keywords "石佛营 整租 转租" "姚家园 整租 转租" "东坝 整租 转租"
+uv run python scripts/xhs_rental_pipeline.py doctor          # 自检：bridge/扩展/字体
+uv run python scripts/cli.py check-login                      # 未登录会给出二维码，让用户扫码
 
-# 2. 初筛 (排除求租、合租、公寓)
-python scripts/xhs_rental_pipeline.py filter \
-  --raw-file "./rental_work/raw_feeds.json"
-
-# 3. 深入正文与实拍抓取
-python scripts/xhs_rental_pipeline.py inspect \
-  --filtered-file "./rental_work/filtered_feeds.json" \
-  --limit 15
-
-# 4. 执行 4 大防坑算法分析
-python scripts/xhs_rental_pipeline.py analyze \
-  --detailed-file "./rental_work/detailed_posts.json"
-
-# 5. 渲染可视化实拍海报
-python scripts/xhs_rental_pipeline.py render-poster \
-  --analyzed-file "./rental_work/analyzed_results.json" \
-  --output "./rental_report.png"
-
-# 6. 批量跟进优质房源
-python scripts/xhs_rental_pipeline.py comment \
-  --analyzed-file "./rental_work/analyzed_results.json" \
-  --message "您好，请问房子还在吗？方便礼貌问价和了解起租日吗～" \
-  --top-n 3
+uv run python scripts/xhs_rental_pipeline.py run-all \
+  --keywords "东坝 整租 转租" "褡裢坡 一居 转租" "朝阳 个人转租 整租" \
+  --budget-min 3500 --budget-max 5000 --bedrooms 一居 两居 \
+  --max-age-days 30 --area-keywords 东坝 褡裢坡 --city 北京 \
+  --limit 15 --author-limit 8
 ```
 
----
+`run-all` = search → filter → inspect → check-authors → analyze → digest → render-poster（**不含评论**）。
+各步可单独运行，参数见 `--help`；详情与主页均有缓存，重跑会跳过已完成部分。
 
-## 📋 交付物标准与呈现格式
+**看退出码与最后一行 JSON：**
 
-当向用户回复时，必须包含以下三个维度的信息：
+- `0`：成功，`counts` 给出高可信/待核实/疑似/排除数量。
+- `3`：小红书要求人工验证。**立即停下**，请用户在 Chrome 里打开小红书完成验证，几分钟后重跑同一命令。
+  不要改小 `--delay`、不要换方式绕过。
+- `2`：其他错误，按 `error`/`hints` 排查（见文末）。
 
-1. **可视化报告长图**：直接展示生成的 `rental_report.png`，让用户直观看到每套房子的实拍房间图（卧室、客厅、厨房卫浴）。
-2. **结构化房源明细**：
-   * **小区与户型**：如 `东坝华瀚福园C区 · 两居室整租`
-   * **租金与付款**：如 `4500元/月 (押一付三)`
-   * **真实转租细节**：如工作变动、离京、换大房、自留家具赠送清单
-   * **签约方式**：明确是否为“直接与房东签约”
-   * **【防坑鉴别诊断】**：逐项对照 4 大特征，给出该房源的真实性评级（🌟 高可信 / 🔍 待核实 / ⚠️ 疑似中介串串房）
-3. **典型避坑案例剖析**：挑出 1 套具有代表性的疑似中介马甲/伪装人设的帖子进行解剖，教育用户线下识别。
-4. **实地看房防坑 3 铁律**：
-   * 验明正身：看房时务必让转租人出示近 3~6 个月的水电燃气缴费流水与外卖订单；
-   * 拒绝转包：必须查验房产证身份证原件，直接将押金打给房东本人；
-   * 串串房刺鼻警惕：关窗 3 分钟闻气味，观察劣质颗粒板与新贴地板革，有刺鼻异味果断放弃。
+结果太少时：换关键词再 `search`（结果会累积去重），然后 `filter → inspect → analyze → digest`。
+保持 `--limit` ≤ 20、`--author-limit` ≤ 10：够用就停，不做大批量抓取。
+
+## 第 3 步：逐条复核（核心）
+
+读 `<W>/review.md`。每条包含：抽取的价格/户型/租期、命中的正向与风险证据（带原文片段）、
+主页房源帖数量、正文、建议追问。按 [references/anti-agent-rules.md](references/anti-agent-rules.md)
+的四条法则给出**你自己的**结论，特别留意规则分看不出来的情况：
+
+- 文案通顺、细节丰富，但读起来像模板改写（每篇结构一样、只换小区名）→ 批量营销
+- 昵称/头像“个人化”，但口吻是“宝子们有需要的滴滴我”“还有其他房源” → 人设与口吻不一致
+- 规则判“排除”的帖子是否误杀（看 review.md 末尾“已排除”表）
+- 价格明显低于同区域行情 → 引流钓鱼
+- 主页未核验或核验失败的高分帖：结论最多给“待核实”
+- “跨账号雷同”要看另一个账号是谁（昵称“小号”+本人日常 ≠ 批量中介）；IP 属地不符可能只是人在外地
+- 公租房/保障房/人才房（如“燕保”）转租有被清退风险，即使发帖人真实也要提醒
+
+然后把精选结果写入 `<W>/curated.json`（格式：[references/curated-schema.md](references/curated-schema.md)），
+一般 3~6 套推荐 + 1 个典型避坑案例，重新出图：
+
+```bash
+uv run python scripts/xhs_rental_pipeline.py render-poster --title "北京朝阳 · 东坝个人整租精选"
+```
+
+渲染后用 Read 打开 PNG 检查一遍（文字是否截断、图片是否加载）。
+
+## 第 4 步：交付
+
+1. **长图报告**（`rental_report.png`）。
+2. **逐套结论**（与长图一致，便于复制）：小区·户型 / 租金与付款方式 / 转租原因 / 签约方式与剩余租期 /
+   可信度结论 + 关键证据 / 看房前要追问的 2~3 个问题 / 原帖链接。
+3. **一个避坑案例拆解**：指出具体是哪几条特征露馅，帮用户以后自己识别。
+4. **线下看房三条铁律**：核验转租人确实住在这里（本人名下近几个月水电燃气缴费或该地址的订单记录）；
+   见房东本人、核对房产证与身份证，钱只打给房东同名账户；新装修房关窗闻味、看板材，可要求甲醛检测。
+
+结论措辞保持克制：“疑似”“待核实”，不要断言某个具体的人是骗子。
+
+## 评论与私信：必须先得到用户明确同意
+
+评论会以用户的账号公开发出。流程：
+
+1. 先预览（不会发送）：
+   `uv run python scripts/xhs_rental_pipeline.py comment --ids <id1> <id2> --message "你好，请问房子还在吗？可以和房东直接签吗？"`
+2. 把目标帖子和评论原文给用户看，等用户明确说“发”。
+3. 再加 `--confirm` 执行。已评论过的帖子会自动跳过；每条之间间隔 20~40 秒。
+
+优先建议用户自己私信联系（更自然，也不会让对方觉得被群发）。不要替用户发私信、加微信或做任何承诺。
+
+## 节制与隐私
+
+- 只抓与本次需求相关的少量帖子，保持默认间隔；遇到验证就停。
+- 报告供用户个人看房使用。不要把发帖人主页信息、截图汇总后公开发布或用于其他目的。
+- 不修改 `scripts/xhs/` 中的风控相关逻辑。
+
+## 故障排查
+
+| 现象 | 处理 |
+|---|---|
+| `doctor` 显示 server=false | 运行 `python scripts/bridge_server.py`，或执行一次 `cli.py check-login`（会自动拉起） |
+| server=true 但 extension=false | Chrome → `chrome://extensions` → 开发者模式 → 加载 `extension/`；打开 xiaohongshu.com |
+| `check-login` 返回未登录 | 把二维码图片给用户扫码，再运行 `cli.py wait-login` |
+| 退出码 3 / “需要扫码验证” | 用户在浏览器完成验证后，等几分钟重跑同一命令 |
+| 海报报“未找到中文字体” | 设置 `XHS_FONT=/path/to/font.ttc`，或 Linux 安装 `fonts-noto-cjk` |
+| 检索结果 0 | 关键词过长/过冷门 → 拆短、换商圈或地铁站名 |
+| 价格抽取为空 | 帖子未写价格或写在图片里 → 在 curated.json 里用 `price_text` 手动填写或写“价格私询” |
+
+更多子能力（发布、互动、登录等）见 `skills/` 下的其他 SKILL.md。

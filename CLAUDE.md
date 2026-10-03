@@ -1,6 +1,6 @@
-# xiaohongshu-skills
+# xhs-rental-hunter
 
-小红书自动化 Claude Code Skills，使用用户的真实浏览器和账号信息操作小红书。
+小红书个人整租猎人 Skill（基于 xiaohongshu-skills 自动化引擎），使用用户的真实浏览器和账号信息操作小红书。
 
 ## Git 工作流
 
@@ -21,6 +21,10 @@ uv run pytest              # 运行测试
 双层结构：`scripts/` 是 Python 自动化引擎，`skills/` 是 Claude Code Skills 定义（SKILL.md 格式）。
 
 - `scripts/xhs/` — 核心自动化库（模块化，每个功能一个文件）
+- `scripts/rental/` — 租房研判：`extract`（字段抽取）、`rules`（信号与打分）、`digest`（review.md）、
+  `poster`（长图）为纯函数可离线测试；`pipeline` 负责编排，浏览器操作只调用 `xhs` 库函数
+- `scripts/xhs_rental_pipeline.py` — 租房流水线 CLI（退出码 0/2/3，3=需人工验证）
+- `references/` — SKILL.md 按需引用的参考文档
 - `scripts/cli.py` — 统一 CLI 入口，JSON 结构化输出，自动启动 bridge server 和浏览器
 - `scripts/bridge_server.py` — 本地通信服务（连接 CLI 与浏览器扩展）
 - `extension/` — Chrome 扩展，在用户的真实浏览器中执行操作
@@ -45,9 +49,16 @@ python scripts/cli.py publish --title-file t.txt --content-file c.txt --images p
 - 用户可见错误信息使用中文
 - JSON 输出 `ensure_ascii=False`
 
+### 租房规则修改约定
+
+- 新增/调整信号只改 `scripts/rental/rules.py` 中的 `Signal` 数据，并在 `tests/test_rules.py` 加正反用例
+- 规则不得依据性别、年龄等刻板印象；语义判断留给 Claude 复核（见 references/anti-agent-rules.md）
+- 修改根目录 SKILL.md 后需同步 `skills/xhs-rental-hunter/SKILL.md`（`tests/test_skill_docs.py` 会校验）
+
 ### 安全约束
 
-- 发布类操作必须有用户确认机制
+- 发布、评论等对外操作必须有用户确认机制（`comment` 默认 dry-run，`--confirm` 才发送）
+- 遇到小红书人工验证立即停止并提示用户，不做绕过
 - 文件路径必须使用绝对路径
 - 敏感内容通过文件传递，不内联到命令行参数
 

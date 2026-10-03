@@ -1,6 +1,6 @@
 [project]
 name = "xhs-rental-hunter"
-version = "1.0.0"
+version = "2.0.0"
 description = "小红书个人整租转租猎人与防中介/串串房避坑技能，基于真实浏览器自动化，支持房源检索、防坑研判、实拍海报渲染与批量评论互动"
 readme = "README.md"
 license = { text = "MIT" }
