@@ -12,7 +12,7 @@
 importScripts("netlogger.js");
 netlogInit().catch(e => console.warn("[XHS NetLogger] init failed", e));
 
-const BRIDGE_URL = "ws://localhost:9333";
+const BRIDGE_URL = "ws://127.0.0.1:9333";
 let ws = null;
 
 // 保持 service worker 存活：有开放的 WebSocket 连接时 Chrome 不会终止 SW
@@ -88,16 +88,20 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 });
 
-function connect() {
+async function connect() {
+  if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
+  const { bridgeToken = "" } = await chrome.storage.local.get("bridgeToken");
+  if (bridgeToken.length < 32) {
+    setStatus(false);
+    return;
+  }
   if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
 
   ws = new WebSocket(BRIDGE_URL);
 
   ws.onopen = () => {
     console.log("[XHS Bridge] 已连接到 bridge server");
-    ws.send(JSON.stringify({ role: "extension" }));
-    setStatus(true);
-    broadcastStatus();
+    ws.send(JSON.stringify({ role: "extension", token: bridgeToken }));
   };
 
   ws.onmessage = async (event) => {
@@ -105,6 +109,11 @@ function connect() {
     try {
       msg = JSON.parse(event.data);
     } catch {
+      return;
+    }
+    if (msg.ready === true) {
+      setStatus(true);
+      broadcastStatus();
       return;
     }
     try {
@@ -126,6 +135,13 @@ function connect() {
     console.error("[XHS Bridge] WS 错误", e);
   };
 }
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.bridgeToken) {
+    if (ws) ws.close();
+    else connect();
+  }
+});
 
 // ───────────────────────── 命令路由 ─────────────────────────
 

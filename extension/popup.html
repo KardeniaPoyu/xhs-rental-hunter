@@ -130,6 +130,11 @@
 </head>
 <body>
   <h3 id="title-hit" style="cursor:default;user-select:none">XHS Bridge</h3>
+  <label for="bridge-token">本机配对码</label>
+  <input id="bridge-token" type="password" autocomplete="off" minlength="32"
+         placeholder="与 XHS_BRIDGE_TOKEN 一致" style="width:100%;box-sizing:border-box">
+  <button class="btn" id="save-token">保存并连接</button>
+  <p class="hint" id="pairing-hint">配对码只保存在当前浏览器，不要分享到报告中。</p>
 
   <div class="row">
     <span class="label">Bridge 服务</span>

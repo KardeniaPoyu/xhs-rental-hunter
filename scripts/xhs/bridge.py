@@ -10,16 +10,18 @@ bridge_server 转发给浏览器扩展执行，结果原路返回。
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import os
 import time
 from typing import Any
 
 import websockets.sync.client as ws_client
+from websockets.exceptions import WebSocketException
 
 from .errors import CDPError, ElementNotFoundError
 
-BRIDGE_URL = "ws://localhost:9333"
+BRIDGE_URL = "ws://127.0.0.1:9333"
 
 
 class BridgePage:
@@ -32,18 +34,21 @@ class BridgePage:
 
     def _call(self, method: str, params: dict | None = None) -> Any:
         """向 bridge server 发送一条命令并等待结果。"""
-        msg: dict[str, Any] = {"role": "cli", "method": method}
+        token = os.environ.get("XHS_BRIDGE_TOKEN", "")
+        if len(token) < 32:
+            raise CDPError("请先设置 XHS_BRIDGE_TOKEN，并在扩展中填写相同配对码。")
+        msg: dict[str, Any] = {"role": "cli", "method": method, "token": token}
         if params:
             msg["params"] = params
         try:
             with ws_client.connect(self._bridge_url, max_size=50 * 1024 * 1024) as ws:
                 ws.send(json.dumps(msg, ensure_ascii=False))
                 raw = ws.recv(timeout=90)
-        except OSError as e:
+        except (OSError, WebSocketException) as e:
             raise CDPError(f"无法连接到 bridge server（ws://localhost:9333）: {e}") from e
 
         resp = json.loads(raw)
-        if "error" in resp and resp["error"]:
+        if resp.get("error"):
             raise CDPError(f"Bridge 错误: {resp['error']}")
         return resp.get("result")
 
@@ -67,7 +72,7 @@ class BridgePage:
         except CDPError as e:
             if "Frame with ID 0 was removed" in str(e):
                 time.sleep(1.0)
-                try:
+                with contextlib.suppress(Exception):
                     self._call(
                         "wait_dom_stable",
                         {
@@ -75,8 +80,6 @@ class BridgePage:
                             "interval": int(interval * 1000),
                         },
                     )
-                except Exception:
-                    pass
             else:
                 raise
 
@@ -289,7 +292,15 @@ class BridgePage:
         """检查 bridge server 是否在运行（不需要 extension 已连接）。"""
         try:
             with ws_client.connect(self._bridge_url, open_timeout=3) as ws:
-                ws.send(json.dumps({"role": "cli", "method": "ping_server"}))
+                ws.send(
+                    json.dumps(
+                        {
+                            "role": "cli",
+                            "method": "ping_server",
+                            "token": os.environ.get("XHS_BRIDGE_TOKEN", ""),
+                        }
+                    )
+                )
                 raw = ws.recv(timeout=5)
             resp = json.loads(raw)
             return "result" in resp
@@ -300,7 +311,15 @@ class BridgePage:
         """检查浏览器扩展是否已连接到 bridge server。"""
         try:
             with ws_client.connect(self._bridge_url, open_timeout=3) as ws:
-                ws.send(json.dumps({"role": "cli", "method": "ping_server"}))
+                ws.send(
+                    json.dumps(
+                        {
+                            "role": "cli",
+                            "method": "ping_server",
+                            "token": os.environ.get("XHS_BRIDGE_TOKEN", ""),
+                        }
+                    )
+                )
                 raw = ws.recv(timeout=5)
             resp = json.loads(raw)
             return bool(resp.get("result", {}).get("extension_connected"))

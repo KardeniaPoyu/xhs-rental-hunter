@@ -15,25 +15,29 @@ import argparse
 import asyncio
 import json
 import logging
+import os
+import secrets
 import sys
 import uuid
 from typing import Any
 
-import websockets
-from websockets.server import ServerConnection
+from websockets.asyncio.server import ServerConnection, serve
 
 logger = logging.getLogger("xhs-bridge")
 
 
 class BridgeServer:
-    def __init__(self) -> None:
+    def __init__(self, token: str | None = None) -> None:
+        self.token = token or os.environ.get("XHS_BRIDGE_TOKEN", "")
+        if len(self.token) < 32:
+            raise ValueError("请设置至少 32 字符的 XHS_BRIDGE_TOKEN，并在扩展中填写相同配对码。")
         self._extension_ws: ServerConnection | None = None
         self._pending: dict[str, asyncio.Future[Any]] = {}
 
     async def handle(self, ws: ServerConnection) -> None:
         try:
             raw = await asyncio.wait_for(ws.recv(), timeout=10)
-        except (asyncio.TimeoutError, Exception) as e:
+        except (TimeoutError, Exception) as e:
             logger.warning("握手超时或失败: %s", e)
             return
 
@@ -42,8 +46,26 @@ class BridgeServer:
         except json.JSONDecodeError:
             return
 
+        if not isinstance(msg, dict):
+            await ws.close(code=1008, reason="Invalid message")
+            return
+        supplied = msg.get("token")
+        if not isinstance(supplied, str) or not secrets.compare_digest(
+            supplied.encode("utf-8"), self.token.encode("utf-8")
+        ):
+            await ws.close(code=1008, reason="Pairing required")
+            return
+        origin = ws.request.headers.get("Origin") if ws.request else None
+        if origin and not origin.startswith("chrome-extension://"):
+            await ws.close(code=1008, reason="Origin rejected")
+            return
+        msg.pop("token", None)
         role = msg.get("role")
         if role == "extension":
+            if self._extension_ws is not None:
+                await ws.close(code=1008, reason="Extension already connected")
+                return
+            await ws.send(json.dumps({"ready": True}))
             await self._handle_extension(ws)
         elif role == "cli":
             await self._handle_cli(ws, msg)
@@ -60,6 +82,8 @@ class BridgeServer:
                 try:
                     msg = json.loads(raw)
                 except json.JSONDecodeError:
+                    continue
+                if not isinstance(msg, dict):
                     continue
                 msg_id = msg.get("id")
                 if msg_id and msg_id in self._pending:
@@ -80,13 +104,15 @@ class BridgeServer:
     async def _handle_cli(self, ws: ServerConnection, msg: dict) -> None:
         # 特殊命令：查询 server/extension 状态，无需转发
         if msg.get("method") == "ping_server":
-            await ws.send(json.dumps({
-                "result": {"extension_connected": self._extension_ws is not None}
-            }))
+            await ws.send(
+                json.dumps({"result": {"extension_connected": self._extension_ws is not None}})
+            )
             return
 
         if not self._extension_ws:
-            await ws.send(json.dumps({"error": "Extension 未连接，请确认浏览器已安装并启用 XHS Bridge 扩展"}))
+            await ws.send(
+                json.dumps({"error": "Extension 未连接，请确认浏览器已安装并启用 XHS Bridge 扩展"})
+            )
             return
 
         msg_id = str(uuid.uuid4())
@@ -96,21 +122,22 @@ class BridgeServer:
         future: asyncio.Future[Any] = loop.create_future()
         self._pending[msg_id] = future
 
-        await self._extension_ws.send(json.dumps(msg))
-
         try:
+            await self._extension_ws.send(json.dumps(msg))
             result = await asyncio.wait_for(future, timeout=90.0)
             await ws.send(json.dumps(result))
-        except asyncio.TimeoutError:
+        except TimeoutError:
             self._pending.pop(msg_id, None)
             await ws.send(json.dumps({"error": "命令执行超时（90s）"}))
         except ConnectionError as e:
             await ws.send(json.dumps({"error": str(e)}))
+        finally:
+            self._pending.pop(msg_id, None)
 
 
 async def main(port: int) -> None:
     server = BridgeServer()
-    async with websockets.serve(server.handle, "localhost", port):
+    async with serve(server.handle, "127.0.0.1", port, max_size=8 * 1024 * 1024):
         logger.info("Bridge server 已启动: ws://localhost:%d", port)
         logger.info("等待浏览器扩展连接...")
         await asyncio.Future()  # 永久运行

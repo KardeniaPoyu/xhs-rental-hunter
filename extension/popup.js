@@ -1,3 +1,15 @@
+document.getElementById("save-token").addEventListener("click", async () => {
+  const input = document.getElementById("bridge-token");
+  const hint = document.getElementById("pairing-hint");
+  if (input.value.length < 32) {
+    hint.textContent = "配对码至少需要 32 个字符。";
+    return;
+  }
+  await chrome.storage.local.set({ bridgeToken: input.value });
+  input.value = "";
+  hint.textContent = "已保存。请确认本地服务使用同一配对码。";
+});
+
 function renderStatus(wsConnected) {
   set("bridge-status", "bridge-dot", "bridge-text", wsConnected, wsConnected ? "已连接" : "未连接");
   set("ext-status",   "ext-dot",   "ext-text",   true, "运行中");
