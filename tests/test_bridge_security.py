@@ -156,7 +156,15 @@ def test_duplicate_extension_never_replaces_owner():
 
 def test_timeout_retries_join_original_operation_and_return_late_result():
     async def scenario():
-        bridge = BridgeServer(TOKEN, request_timeout=0.02)
+        retry_joined = asyncio.Event()
+
+        class ObservedBridge(BridgeServer):
+            async def _handle_cli(self, ws, session, message):
+                if message.get("request_id") in self._requests:
+                    retry_joined.set()
+                await super()._handle_cli(ws, session, message)
+
+        bridge = ObservedBridge(TOKEN, request_timeout=0.02)
         async with host(bridge) as server, connect(url(server)) as extension:
             es = await authenticate(extension, "extension")
             rid = request_id(bridge)
@@ -166,13 +174,17 @@ def test_timeout_retries_join_original_operation_and_return_late_result():
                 await first.send(cs.pack(message))
                 command = es.unpack(await extension.recv())
                 assert cs.unpack(await first.recv())["status"] == "in_flight"
+            # Only the first request needs a short timeout. Synchronize the retry by event,
+            # rather than assuming Windows can schedule two sockets within 20 milliseconds.
+            bridge.request_timeout = 5
             async with connect(url(server)) as retry:
                 cs = await authenticate(retry)
                 await retry.send(cs.pack(message))
-                with pytest.raises(TimeoutError):
-                    await asyncio.wait_for(extension.recv(), 0.005)
+                await asyncio.wait_for(retry_joined.wait(), 5)
                 await extension.send(es.pack({"id": command["id"], "result": "done"}))
                 assert cs.unpack(await retry.recv())["result"] == "done"
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(extension.recv(), 0.01)
             async with connect(url(server)) as cached:
                 cs = await authenticate(cached)
                 assert (await ask(cached, cs, message))["result"] == "done"
