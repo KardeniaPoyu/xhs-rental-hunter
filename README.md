@@ -42,6 +42,8 @@ python -m rental_hunter report --input listings.json --min-budget 2000 --max-bud
 出租方式支持 `entire`（整租）、`shared`（合租）、`any`（不限）。
 月租需有明确标签或每月单位；多个报价标记待确认。最多 500 条、5 MB，
 自动去重，不覆盖现有报告目录。
+默认预算为 0–5000 元、整租；报告与浏览器流水线共用同一默认值。
+只有完整记录相同才去重，同 ID 但内容不同的记录会保留。
 
 ## 边界
 
@@ -55,7 +57,8 @@ python -m rental_hunter report --input listings.json --min-budget 2000 --max-bud
 
 安装 `python -m pip install ".[browser]"`，并准备本地登录态、扩展和配对码，
 见 [浏览器接入](references/browser.md)。
-本版 Bridge 增加本机配对认证，未配对客户端不能直接发命令。
+本版 Bridge 使用双向配对认证与签名消息，超时请求按原编号恢复。
+升级时需同时更新服务端、CLI 和扩展，详见上述浏览器接入说明。
 旧仓库通用发布、点赞等工具不属于本次商品包。
 
 ## 开发

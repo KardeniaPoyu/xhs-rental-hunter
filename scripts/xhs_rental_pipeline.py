@@ -39,8 +39,13 @@ if CURRENT_DIR not in sys.path:
 # Allow direct execution from the source/Skill directory as well as an installed package.
 if str(Path(__file__).resolve().parents[1]) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from rental_hunter.report import (
+    DEFAULT_HOUSING,
+    DEFAULT_MAX_BUDGET,
+    DEFAULT_MIN_BUDGET,
+    positive_mentions,
+)
 from rental_hunter.report import analyze as compare_listings
-from rental_hunter.report import positive_mentions
 from xhs.bridge import BridgePage
 from xhs.urls import make_feed_detail_url
 
@@ -74,6 +79,15 @@ HEADERS = {
     ),
     "Referer": "https://www.xiaohongshu.com/",
 }
+
+
+def select_poster_candidates(results):
+    matches = [r for r in results if r["verdict"].startswith("符合已知条件")]
+    warnings = [r for r in results if r.get("mismatches") or r["verdict"].startswith("信息不足")]
+    curated = [dict(r) for r in matches[:5]]
+    if warnings:
+        curated.append({**warnings[0], "is_warn_case": True})
+    return curated
 
 
 class RentalPipeline:
@@ -216,15 +230,20 @@ class RentalPipeline:
         print(f"[Inspect] 深度勘查完成！成功获取 {len(inspected)} 条完整房源，保存至: {out_path}")
         return out_path
 
-    def analyze(self, detailed_path: str, min_budget: int = 3000, max_budget: int = 4800) -> str:
+    def analyze(
+        self,
+        detailed_path: str,
+        min_budget: float = DEFAULT_MIN_BUDGET,
+        max_budget: float = DEFAULT_MAX_BUDGET,
+        housing: str = DEFAULT_HOUSING,
+    ) -> str:
         """Compare against constraints; supplied prose does not establish credibility."""
         with open(detailed_path, encoding="utf-8") as source:
             posts = json.load(source)
-        report = compare_listings(posts, min_budget, max_budget)
-        originals = {str(p.get("id")): p for p in posts}
+        report = compare_listings(posts, min_budget, max_budget, housing)
         results = []
         for row in report["listings"]:
-            post = originals.get(row["id"], {})
+            post = posts[row["source_index"]]
             results.append(
                 {
                     **row,
@@ -233,7 +252,6 @@ class RentalPipeline:
                     "author": post.get("user", {}).get("nickname", ""),
                     "pub_time": row["published_at"],
                     "images": post.get("images", []),
-                    "xsec_token": post.get("xsec_token", ""),
                     "real_signals": [f"{e['field']}：{e['quote']}" for e in row["evidence"]],
                     "suspect_reasons": row["mismatches"] + row["unknowns"],
                 }
@@ -269,16 +287,7 @@ class RentalPipeline:
             all_results = json.load(f)
 
         # 选出 top 5 优质房源 + 1 典型避坑案例
-        top_candidates = [r for r in all_results if "不符合" not in r["verdict"]][:5]
-        warn_candidates = [
-            r for r in all_results if "信息不足" in r["verdict"] or len(r["suspect_reasons"]) > 0
-        ]
-        warn_case = warn_candidates[0] if warn_candidates else None
-
-        curated = list(top_candidates)
-        if warn_case and warn_case["id"] not in [c["id"] for c in curated]:
-            warn_case["is_warn_case"] = True
-            curated.append(warn_case)
+        curated = select_poster_candidates(all_results)
 
         if not curated:
             print("[Poster] 未找到有效房源数据，跳过海报渲染。")
@@ -494,7 +503,7 @@ class RentalPipeline:
         return path
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description="小红书房源条件对比与询问草稿")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -516,8 +525,6 @@ def main():
 
     # analyze
     p_analyze = subparsers.add_parser("analyze", help="按预算与原文对比")
-    p_analyze.add_argument("--min-budget", type=float, default=0)
-    p_analyze.add_argument("--max-budget", type=float, default=5000)
     p_analyze.add_argument("--detailed-file", required=True, help="detailed_posts.json 路径")
     p_analyze.add_argument("--work-dir", default="./rental_work", help="工作目录")
 
@@ -543,7 +550,13 @@ def main():
     p_all.add_argument("--work-dir", default="./rental_work", help="工作目录")
     p_all.add_argument("--output-png", help="海报输出路径")
 
-    args = parser.parse_args()
+    for child in (p_analyze, p_all):
+        child.add_argument("--min-budget", type=float, default=DEFAULT_MIN_BUDGET)
+        child.add_argument("--max-budget", type=float, default=DEFAULT_MAX_BUDGET)
+        child.add_argument(
+            "--housing", choices=["entire", "shared", "any"], default=DEFAULT_HOUSING
+        )
+    args = parser.parse_args(argv)
     pipeline = RentalPipeline(work_dir=args.work_dir)
 
     if args.command == "search":
@@ -553,7 +566,7 @@ def main():
     elif args.command == "inspect":
         pipeline.inspect(args.filtered_file, max_inspect=args.limit)
     elif args.command == "analyze":
-        pipeline.analyze(args.detailed_file, args.min_budget, args.max_budget)
+        pipeline.analyze(args.detailed_file, args.min_budget, args.max_budget, args.housing)
     elif args.command == "render-poster":
         pipeline.render_poster(args.analyzed_file, output_png_path=args.output)
     elif args.command == "comment":
@@ -562,7 +575,7 @@ def main():
         raw = pipeline.search(args.keywords)
         filtered = pipeline.filter_candidates(raw)
         detailed = pipeline.inspect(filtered, max_inspect=args.limit)
-        analyzed = pipeline.analyze(detailed)
+        analyzed = pipeline.analyze(detailed, args.min_budget, args.max_budget, args.housing)
         png = pipeline.render_poster(analyzed, output_png_path=args.output_png)
         print(f"\n[Run-All] 全流程执行完毕！海报路径: {png}")
 

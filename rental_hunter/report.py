@@ -14,6 +14,9 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 LIMIT = 500
+DEFAULT_MIN_BUDGET = 0
+DEFAULT_MAX_BUDGET = 5000
+DEFAULT_HOUSING = "entire"
 DISCLAIMER = "结果只依据输入文字；身份、房屋状况、签约权限和是否仍可租均待核实。"
 
 
@@ -39,53 +42,66 @@ def positive_mentions(text: str, terms: str) -> list[str]:
     hits = []
     for match in re.finditer(terms, text, flags=re.I):
         prefix = text[max(0, match.start() - 6) : match.start()]
-        if re.search(r"(?:不|非|无|拒绝|无需|不是|不考虑|不要|不收|免)\s*$", prefix):
+        if re.search(r"(?:不|非|无|拒绝|无需|不是|不考虑|不接受|不支持|不要|不收|免)\s*$", prefix):
             continue
         hits.append(match.group())
     return list(dict.fromkeys(hits))
 
 
 def rent_evidence(text: str) -> list[dict]:
-    # Require an explicit monthly unit or a rent label. Deposits are not monthly rent.
-    label = r"(?:租金每月|每月租金|月租金|租金|月租|房租)\s*[:：约为是]?\s*[¥￥]?\s*"
-    number = r"(\d+(?:\.\d+)?)\s*([kK千]?)"
-    monthly = r"\s*(?:元|块)?\s*(?:/\s*月|每月|一个月)"
-    range_body = number + r"\s*(?:元|块)?\s*[-—–~～至到]\s*" + number
-    range_pattern = label + range_body + "|" + range_body + monthly
-    ranges = list(re.finditer(range_pattern, text))
+    """Parse whole amounts only, retaining the surrounding evidence for review."""
+    number = r"(?:\d{1,3}(?:[,，]\d{3})+|\d+)(?:\.\d+)?"
+    pattern = re.compile(
+        rf"(?<![\d.,，])(?P<low>{number})\s*(?P<low_unit>[kK千万]?)"
+        rf"(?:\s*(?:元|块)?\s*[-—–~～至到]\s*(?P<high>{number})\s*"
+        r"(?P<high_unit>[kK千万]?))?(?![\d.,，kK千万亿])"
+    )
+    label = re.compile(
+        r"(?:租金每月|每月租金|月租金|租金|月租|房租|每月)\s*[:：约为是]?\s*[¥￥]?\s*$"
+    )
+    monthly = re.compile(r"\s*(?:元|块)?\s*(?:[/／]\s*月|每月|一个月)")
+    annual_prefix = re.compile(r"(?:年|日|天|周)(?:租金|房租|租)?\s*[:：约为是]?\s*[¥￥]?\s*$")
+    other_period = re.compile(
+        r"\s*(?:元|块)?\s*(?:[/／]\s*[年天日周]|每[年天日周]|一(?:个)?[年天日周])"
+    )
+    fee = re.compile(r"押金|服务费|中介费|水电|水费|电费|物业费|管理费")
     evidence = []
-    for match in ranges:
-        if re.match(
-            r"\s*(?:元|块)?\s*(?:/\s*(?:年|天|日|周)|每(?:年|天|日|周))", text[match.end() :]
-        ):
+    for match in pattern.finditer(text):
+        prefix = re.split(r"[,，。；;\n]", text[: match.start()])[-1][-40:]
+        suffix = text[match.end() :]
+        before, after = label.search(prefix), monthly.match(suffix)
+        if not (before or after) or annual_prefix.search(prefix) or other_period.match(suffix):
             continue
-        values = match.groups()
-        low, low_unit, high, high_unit = values[:4] if values[0] else values[4:]
-        for value, unit in [(low, low_unit or high_unit), (high, high_unit)]:
-            price = float(value) * (1000 if unit else 1)
+        # A fee may have words such as “另收” or “每月” before its amount.
+        fee_hits = list(fee.finditer(prefix))
+        rent_hits = list(re.finditer(r"月租|房租|租金", prefix))
+        if fee_hits and (not rent_hits or fee_hits[-1].start() > rent_hits[-1].start()):
+            continue
+        start = match.start() - len(prefix) + before.start() if before else match.start()
+        end = match.end() + (after.end() if after else 0)
+        high = match.group("high")
+        amounts = [
+            (
+                match.group("low"),
+                match.group("low_unit") or (match.group("high_unit") if high else ""),
+            )
+        ]
+        if high:
+            amounts.append((high, match.group("high_unit") or match.group("low_unit")))
+        for value, unit in amounts:
+            price = float(value.replace(",", "").replace("，", "")) * (
+                10000 if unit == "万" else 1000 if unit else 1
+            )
             if 0 < price <= 1_000_000:
-                evidence.append({"amount": price, "quote": match.group()})
-    pattern = label + number + "|" + number + monthly
-    for match in re.finditer(pattern, text):
-        if any(match.start() < item.end() and match.end() > item.start() for item in ranges):
-            continue
-        prefix = text[max(0, match.start() - 5) : match.start()]
-        if re.search(r"(押金|服务费|水电|物业费)\s*[:：]?\s*$", prefix):
-            continue
-        if re.match(
-            r"\s*(?:元|块)?\s*(?:/\s*(?:年|天|日|周)|每(?:年|天|日|周))", text[match.end() :]
-        ):
-            continue
-        number = match.group(1) or match.group(3)
-        unit = match.group(2) or match.group(4)
-        price = float(number) * (1000 if unit else 1)
-        if 0 < price <= 1_000_000:
-            evidence.append({"amount": price, "quote": match.group()})
+                evidence.append({"amount": price, "quote": text[start:end]})
     return evidence
 
 
 def analyze(
-    posts: list[dict], min_budget: float = 0, max_budget: float = 5000, housing: str = "entire"
+    posts: list[dict],
+    min_budget: float = DEFAULT_MIN_BUDGET,
+    max_budget: float = DEFAULT_MAX_BUDGET,
+    housing: str = DEFAULT_HOUSING,
 ) -> dict:
     for amount in (min_budget, max_budget):
         if isinstance(amount, bool) or not math.isfinite(amount) or amount < 0:
@@ -107,15 +123,16 @@ def analyze(
             raise ValueError(f"第 {index} 条文字过长（上限 30000 字符）。")
         source = safe_url(str(post.get("url", "")))
         text = title + "\n" + desc
-        identity = str(
-            post.get("id")
-            or source
-            or hashlib.sha256(re.sub(r"\s+", "", text).encode()).hexdigest()
-        )
-        if identity in seen:
+        # Deduplicate identical records only; IDs and template copy can be reused.
+        # Hash metadata locally, but never publish arbitrary input or secret fields.
+        fingerprint = hashlib.sha256(
+            json.dumps(post, sort_keys=True, ensure_ascii=False).encode()
+        ).hexdigest()
+        if fingerprint in seen:
             duplicates += 1
             continue
-        seen.add(identity)
+        seen.add(fingerprint)
+        identity = str(post.get("id") or source or fingerprint)
         prices = rent_evidence(text)
         distinct_prices = {item["amount"] for item in prices}
         price = next(iter(distinct_prices)) if len(distinct_prices) == 1 else None
@@ -167,6 +184,8 @@ def analyze(
         rows.append(
             {
                 "id": identity,
+                "record_key": fingerprint,
+                "source_index": index - 1,
                 "title": title,
                 "description": desc,
                 "url": source,

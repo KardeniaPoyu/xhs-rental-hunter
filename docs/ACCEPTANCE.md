@@ -2,8 +2,9 @@
 
 ## 已验证
 
-- Windows / Python 3.11：`python -m pytest -q`，35 项通过，包括区间租金、年/日租、输入转义与配对认证。
-- 真实 WebSocket 测试覆盖错误配对拒绝、扩展握手与请求往返；全新虚拟环境按 uv.lock 安装后通过。
+- Windows / Python 3.11：`python -m pytest -q`，65 项通过，包括租金解析、偏好一致性、记录去重与配对认证。
+- 真实本机 WebSocket 测试覆盖双向认证、伪造/重放拒绝、连接限额、扩展注册、断线、超时和客户端重启后重试；Node WebCrypto 与 Python 的协议互通测试通过。
+- 本轮 Sourcery review 的 15 项问题已逐项修改，见 [修订对照](REVIEW_FIXES.md)。此前已在全新虚拟环境按 uv.lock 安装并运行基线测试。
 - Skill frontmatter 校验通过；离线 demo 生成报告。
 - ZIP 仅打包白名单文件，并记录各文件 SHA-256 与源码版本。
 - ZIP 解压到仓库外运行 demo 通过，逐文件 SHA-256 核对通过。

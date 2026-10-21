@@ -24,6 +24,8 @@ def build() -> Path:
         "scripts/bridge_server.py",
         "scripts/xhs_rental_pipeline.py",
         "scripts/xhs/bridge.py",
+        "scripts/xhs/bridge_auth.py",
+        "scripts/xhs/request_state.py",
         "scripts/xhs/errors.py",
         "scripts/xhs/urls.py",
         "scripts/xhs/__init__.py",

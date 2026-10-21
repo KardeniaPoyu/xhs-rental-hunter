@@ -8,7 +8,13 @@ import sys
 from pathlib import Path
 
 from rental_hunter import __version__
-from rental_hunter.report import analyze, write_report
+from rental_hunter.report import (
+    DEFAULT_HOUSING,
+    DEFAULT_MAX_BUDGET,
+    DEFAULT_MIN_BUDGET,
+    analyze,
+    write_report,
+)
 
 DEMO = [
     {
@@ -34,9 +40,11 @@ def main(argv: list[str] | None = None) -> int:
         if command == "report":
             child.add_argument("--input", required=True, help="用户提供的房源 JSON 数组")
         child.add_argument("--output", required=True, help="一个尚不存在的报告目录")
-        child.add_argument("--min-budget", type=float, default=0)
-        child.add_argument("--max-budget", type=float, default=5000)
-        child.add_argument("--housing", choices=["entire", "shared", "any"], default="entire")
+        child.add_argument("--min-budget", type=float, default=DEFAULT_MIN_BUDGET)
+        child.add_argument("--max-budget", type=float, default=DEFAULT_MAX_BUDGET)
+        child.add_argument(
+            "--housing", choices=["entire", "shared", "any"], default=DEFAULT_HOUSING
+        )
     args = parser.parse_args(argv)
     try:
         posts = DEMO

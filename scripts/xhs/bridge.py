@@ -11,15 +11,20 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import hashlib
 import json
 import os
+import sqlite3
 import time
+import uuid
 from typing import Any
 
 import websockets.sync.client as ws_client
 from websockets.exceptions import WebSocketException
 
+from .bridge_auth import authenticate_sync
 from .errors import CDPError, ElementNotFoundError
+from .request_state import RequestState
 
 BRIDGE_URL = "ws://127.0.0.1:9333"
 
@@ -29,28 +34,56 @@ class BridgePage:
 
     def __init__(self, bridge_url: str = BRIDGE_URL) -> None:
         self._bridge_url = bridge_url
+        self._uncertain = {}
+        self._request_state = RequestState()
 
     # ─── 内部通信 ───────────────────────────────────────────────
 
-    def _call(self, method: str, params: dict | None = None) -> Any:
-        """向 bridge server 发送一条命令并等待结果。"""
+    def _call(
+        self, method: str, params: dict | None = None, *, request_id: str | None = None
+    ) -> Any:
+        """Authenticate both endpoints; retry uncertain commands only with their original ID."""
         token = os.environ.get("XHS_BRIDGE_TOKEN", "")
         if len(token) < 32:
             raise CDPError("请先设置 XHS_BRIDGE_TOKEN，并在扩展中填写相同配对码。")
-        msg: dict[str, Any] = {"role": "cli", "method": method, "token": token}
-        if params:
-            msg["params"] = params
+        command = {"method": method, "params": params or {}}
+        key = hashlib.sha256(
+            json.dumps(
+                [self._bridge_url, token, command], sort_keys=True, ensure_ascii=False
+            ).encode()
+        ).hexdigest()
+        current_id = request_id or self._uncertain.get(key)
         try:
-            with ws_client.connect(self._bridge_url, max_size=50 * 1024 * 1024) as ws:
-                ws.send(json.dumps(msg, ensure_ascii=False))
-                raw = ws.recv(timeout=90)
-        except (OSError, WebSocketException) as e:
-            raise CDPError(f"无法连接到 bridge server（ws://localhost:9333）: {e}") from e
-
-        resp = json.loads(raw)
-        if resp.get("error"):
-            raise CDPError(f"Bridge 错误: {resp['error']}")
-        return resp.get("result")
+            with ws_client.connect(self._bridge_url, open_timeout=3, max_size=1024 * 1024) as ws:
+                session, server_id = authenticate_sync(ws, token)
+                if method != "ping_server":
+                    current_id = current_id or f"{server_id}:{uuid.uuid4().hex}"
+                    current_id = self._request_state.obtain(
+                        key, current_id, explicit=request_id is not None
+                    )
+                    command["request_id"] = current_id
+                    self._uncertain[key] = current_id
+                ws.send(session.pack(command))
+                response = session.unpack(ws.recv(timeout=95))
+            if response.get("error"):
+                if response.get("status") == "not_started":
+                    self._request_state.complete(key, current_id)
+                    self._uncertain.pop(key, None)
+                raise CDPError(f"Bridge 错误：{response['error']} 请求编号：{current_id or '无'}")
+            if current_id:
+                self._request_state.complete(key, current_id)
+            self._uncertain.pop(key, None)
+            return response.get("result")
+        except (
+            OSError,
+            sqlite3.Error,
+            WebSocketException,
+            ValueError,
+            TypeError,
+            AttributeError,
+        ) as exc:
+            suffix = f" 请求编号：{current_id}；请用同一编号核实结果。" if current_id else ""
+            raise CDPError(f"Bridge 连接或认证失败：{exc}.{suffix}") from exc
 
     # ─── 导航 ───────────────────────────────────────────────────
 
@@ -289,41 +322,17 @@ class BridgePage:
     # ─── 兼容性辅助方法 ──────────────────────────────────────────
 
     def is_server_running(self) -> bool:
-        """检查 bridge server 是否在运行（不需要 extension 已连接）。"""
+        """Only an authenticated bridge counts as running."""
         try:
-            with ws_client.connect(self._bridge_url, open_timeout=3) as ws:
-                ws.send(
-                    json.dumps(
-                        {
-                            "role": "cli",
-                            "method": "ping_server",
-                            "token": os.environ.get("XHS_BRIDGE_TOKEN", ""),
-                        }
-                    )
-                )
-                raw = ws.recv(timeout=5)
-            resp = json.loads(raw)
-            return "result" in resp
-        except Exception:
+            self._call("ping_server")
+            return True
+        except CDPError:
             return False
 
     def is_extension_connected(self) -> bool:
-        """检查浏览器扩展是否已连接到 bridge server。"""
         try:
-            with ws_client.connect(self._bridge_url, open_timeout=3) as ws:
-                ws.send(
-                    json.dumps(
-                        {
-                            "role": "cli",
-                            "method": "ping_server",
-                            "token": os.environ.get("XHS_BRIDGE_TOKEN", ""),
-                        }
-                    )
-                )
-                raw = ws.recv(timeout=5)
-            resp = json.loads(raw)
-            return bool(resp.get("result", {}).get("extension_connected"))
-        except Exception:
+            return bool((self._call("ping_server") or {}).get("extension_connected"))
+        except CDPError:
             return False
 
     @property
