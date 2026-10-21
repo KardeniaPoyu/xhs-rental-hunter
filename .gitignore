@@ -52,3 +52,10 @@ rental_work/
 scratch/
 cookies.json
 *.log
+
+dist/
+build/
+*.egg-info/
+pytest-of-*/
+demo-output/
+.rental-*/

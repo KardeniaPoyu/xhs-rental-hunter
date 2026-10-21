@@ -9,11 +9,13 @@
  * - get_cookies: chrome.cookies.getAll
  */
 
-importScripts("netlogger.js");
+importScripts("netlogger.js", "bridge-auth.js");
 netlogInit().catch(e => console.warn("[XHS NetLogger] init failed", e));
 
-const BRIDGE_URL = "ws://localhost:9333";
+const BRIDGE_URL = "ws://127.0.0.1:9333";
 let ws = null;
+let bridgeReady = false;
+const bridgeExecutions = new Map();
 
 // 保持 service worker 存活：有开放的 WebSocket 连接时 Chrome 不会终止 SW
 // 额外加 alarm 作为保底
@@ -29,7 +31,7 @@ function setStatus(connected) {
 }
 
 function broadcastStatus() {
-  const status = { wsConnected: ws !== null && ws.readyState === WebSocket.OPEN };
+  const status = { wsConnected: bridgeReady };
   chrome.runtime.sendMessage({ type: "STATUS_CHANGED", status }).catch(() => {});
 }
 
@@ -37,7 +39,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === "GET_STATUS") {
     sendResponse({
       success: true,
-      status: { wsConnected: ws !== null && ws.readyState === WebSocket.OPEN },
+      status: { wsConnected: bridgeReady },
     });
     return true;
   }
@@ -88,44 +90,80 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 });
 
-function connect() {
+async function connect() {
   if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
-
-  ws = new WebSocket(BRIDGE_URL);
-
-  ws.onopen = () => {
-    console.log("[XHS Bridge] 已连接到 bridge server");
-    ws.send(JSON.stringify({ role: "extension" }));
-    setStatus(true);
-    broadcastStatus();
+  const { bridgeToken = "" } = await chrome.storage.local.get("bridgeToken");
+  if (bridgeToken.length < 32) { setStatus(false); return; }
+  if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
+  const socket = new WebSocket(BRIDGE_URL);
+  ws = socket;
+  bridgeReady = false;
+  const greeting = BridgeAuth.hello();
+  let session = null;
+  let ready = false;
+  let incoming = Promise.resolve();
+  let outgoing = Promise.resolve();
+  const timer = setTimeout(() => socket.close(), 4000);
+  const send = message => {
+    outgoing = outgoing.then(async () => socket.send(await session.pack(message)));
+    return outgoing;
   };
-
-  ws.onmessage = async (event) => {
-    let msg;
-    try {
-      msg = JSON.parse(event.data);
-    } catch {
-      return;
-    }
-    try {
-      const result = await handleCommand(msg);
-      ws.send(JSON.stringify({ id: msg.id, result: result ?? null }));
-    } catch (err) {
-      ws.send(JSON.stringify({ id: msg.id, error: String(err.message || err) }));
-    }
+  socket.onopen = () => socket.send(JSON.stringify(greeting));
+  socket.onmessage = event => {
+    incoming = incoming.then(async () => {
+      if (ws !== socket || socket.readyState !== WebSocket.OPEN) return;
+      if (!session) {
+        const result = await BridgeAuth.challenge(bridgeToken, greeting, JSON.parse(event.data));
+        session = result.session;
+        socket.send(JSON.stringify(result.response));
+        return;
+      }
+      const message = await session.unpack(event.data);
+      if (ws !== socket || socket.readyState !== WebSocket.OPEN) return;
+      if (!ready) {
+        if (message.ready !== true) throw new Error("Bridge not ready");
+        ready = true;
+        bridgeReady = true;
+        clearTimeout(timer);
+        setStatus(true);
+        broadcastStatus();
+        return;
+      }
+      if (typeof message.id !== "string" || !message.method) throw new Error("Invalid command");
+      let execution = bridgeExecutions.get(message.id);
+      const fingerprint = JSON.stringify({ method: message.method, params: message.params || {} });
+      if (execution && execution.fingerprint !== fingerprint) throw new Error("Request ID conflict");
+      if (!execution) {
+        if (bridgeExecutions.size >= 256) {
+          await send({ id: message.id, error: "Extension request history full; verify pending work before reload" });
+          return;
+        }
+        execution = { fingerprint, result: Promise.resolve().then(() => handleCommand(message))
+          .then(result => ({ id: message.id, result: result ?? null }))
+          .catch(error => ({ id: message.id, error: String(error.message || error) })) };
+        bridgeExecutions.set(message.id, execution);
+      }
+      // Receiving other commands never replays or cancels this operation.
+      execution.result.then(send).catch(() => socket.close());
+    }).catch(() => socket.close(1008, "Authentication or protocol error"));
   };
-
-  ws.onclose = () => {
-    console.log("[XHS Bridge] 连接断开，3s 后重连...");
+  socket.onclose = () => {
+    clearTimeout(timer);
+    if (ws !== socket) return;
+    bridgeReady = false;
     setStatus(false);
     broadcastStatus();
     setTimeout(connect, 3000);
   };
-
-  ws.onerror = (e) => {
-    console.error("[XHS Bridge] WS 错误", e);
-  };
+  socket.onerror = () => socket.close();
 }
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.bridgeToken) {
+    if (ws) ws.close();
+    else connect();
+  }
+});
 
 // ───────────────────────── 命令路由 ─────────────────────────
 

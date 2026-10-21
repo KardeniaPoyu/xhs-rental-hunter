@@ -1,0 +1,84 @@
+{
+  "observed_date": "2026-10-20",
+  "method": "Read-only unauthenticated production endpoint used by the official public shelf frontend.",
+  "amount_unit": "CNY cents, divided by 100 by the official frontend",
+  "sample_type": "Convenience sample of four public shelves, not a market census.",
+  "limitations": [
+    "Asking prices, not completed transactions or proof of quality.",
+    "No evidence that these products entered the PAYATHON contest.",
+    "Multiple products from the same seller are not independent price observations."
+  ],
+  "shelf_product_counts": {
+    "x": 46,
+    "jht": 39,
+    "secondbrain": 2,
+    "jiupinjinlie": 17
+  },
+  "plan_counts": {
+    "MONTH": 65,
+    "QUARTER": 1,
+    "ONE_TIME": 37,
+    "WEEK": 1
+  },
+  "buyout_amount_counts_minor_units": {
+    "990": 33,
+    "1990": 4
+  },
+  "selected_observations": [
+    {
+      "product_id": "P0806000205850435",
+      "title": "报告里说的·逐条对照文件核",
+      "shelf": "x",
+      "product_url": "https://skillpay.alipay.com/shelf/product?productId=P0806000205850435&merchantCode=x",
+      "source_url": "https://aipayapi.alipay.com/skillpay/public/products/x",
+      "billing_mode": "ONE_TIME",
+      "amount_minor_units": 990,
+      "currency": "CNY",
+      "price_cny": 9.9
+    },
+    {
+      "product_id": "P0806000205847427",
+      "title": "不用装库也能出 Excel·公式能算",
+      "shelf": "x",
+      "product_url": "https://skillpay.alipay.com/shelf/product?productId=P0806000205847427&merchantCode=x",
+      "source_url": "https://aipayapi.alipay.com/skillpay/public/products/x",
+      "billing_mode": "ONE_TIME",
+      "amount_minor_units": 990,
+      "currency": "CNY",
+      "price_cny": 9.9
+    },
+    {
+      "product_id": "P0806000206832774",
+      "title": "video-clip-assistant",
+      "shelf": "jht",
+      "product_url": "https://skillpay.alipay.com/shelf/product?productId=P0806000206832774&merchantCode=jht",
+      "source_url": "https://aipayapi.alipay.com/skillpay/public/products/jht",
+      "billing_mode": "MONTH",
+      "amount_minor_units": 990,
+      "currency": "CNY",
+      "price_cny": 9.9
+    },
+    {
+      "product_id": "P0806000205821620",
+      "title": "法拍NPA估值定价引擎·三情景IRR/MOIC+投标上限反推｜折价真伪拆解+批量筛选",
+      "shelf": "jiupinjinlie",
+      "product_url": "https://skillpay.alipay.com/shelf/product?productId=P0806000205821620&merchantCode=jiupinjinlie",
+      "source_url": "https://aipayapi.alipay.com/skillpay/public/products/jiupinjinlie",
+      "billing_mode": "ONE_TIME",
+      "amount_minor_units": 990,
+      "currency": "CNY",
+      "price_cny": 9.9
+    },
+    {
+      "product_id": "P0806000209816714",
+      "title": "跟AI聊天聊出短视频 · AI短片全链路（专业版）",
+      "shelf": "jiupinjinlie",
+      "product_url": "https://skillpay.alipay.com/shelf/product?productId=P0806000209816714&merchantCode=jiupinjinlie",
+      "source_url": "https://aipayapi.alipay.com/skillpay/public/products/jiupinjinlie",
+      "billing_mode": "ONE_TIME",
+      "amount_minor_units": 1990,
+      "currency": "CNY",
+      "price_cny": 19.9
+    }
+  ]
+}

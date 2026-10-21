@@ -1,4 +1,12 @@
-# xiaohongshu-skills
+# xhs-rental-hunter
+
+## 当前商品范围
+
+1.1.0 的主入口是 `python -m rental_hunter report`，提供本地房源对比。
+根目录 SKILL.md 是商品工作流的权威说明。浏览器采集是可选实验适配器；
+`xhs_rental_pipeline.py comment` 只生成草稿。禁止把文字规则描述成身份、
+产权、空气质量或房源真实性核验。商品包不含旧通用发布/点赞等 CLI。
+下列通用 CLI 文档仅供维护仓库保留的旧工具时参考，依赖安装使用 `.[legacy]`。
 
 小红书自动化 Claude Code Skills，使用用户的真实浏览器和账号信息操作小红书。
 
@@ -10,11 +18,12 @@
 ## 开发命令
 
 ```bash
-uv sync                    # 安装依赖
-uv run ruff check .        # Lint 检查
-uv run ruff format .       # 代码格式化
-uv run pytest              # 运行测试
+uv sync --extra dev         # 安装当前报告与开发依赖
+uv run ruff check rental_hunter tools tests scripts/bridge_server.py scripts/xhs_rental_pipeline.py scripts/xhs/bridge.py
+uv run pytest               # 运行测试
 ```
+
+旧通用 CLI 还有历史 lint 问题；上面列的是本版本维护和验证的范围。
 
 ## 架构
 
